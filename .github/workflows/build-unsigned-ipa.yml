@@ -1,0 +1,72 @@
+name: build-unsigned-ipa
+
+# 在 GitHub 的 macOS runner 上编译 JevJarvis，产出未签名的 .ipa。
+# 签名与装机在 Windows 侧用 Sideloadly 完成（见 部署说明-iOS.md）。
+#
+# 触发方式：仓库页面 Actions → build-unsigned-ipa → Run workflow；
+# 或打一个 v 开头的 tag（git tag v0.2.0 && git push --tags）。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          sw_vers
+
+      - name: Show schemes (debug)
+        run: xcodebuild -project JevJarvis.xcodeproj -list
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project JevJarvis.xcodeproj \
+            -scheme JevJarvis \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned ipa
+        run: |
+          set -euo pipefail
+          APP_DIR="build/Build/Products/Release-iphoneos"
+          APP=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
+          echo "app bundle: $APP"
+          if [ -z "$APP" ]; then echo "no .app produced"; ls -R "$APP_DIR" || true; exit 1; fi
+
+          # 未签名构建出来的 app 里，扩展在 PlugIns/ 下，一起打进 ipa
+          ls -la "$APP/PlugIns" || true
+
+          rm -rf Payload JevJarvis-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry JevJarvis-unsigned.ipa Payload
+          ls -lh JevJarvis-unsigned.ipa
+          unzip -l JevJarvis-unsigned.ipa | head -n 20
+
+      - name: Upload ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: JevJarvis-unsigned-ipa
+          path: JevJarvis-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

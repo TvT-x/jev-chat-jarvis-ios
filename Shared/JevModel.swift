@@ -130,15 +130,29 @@ enum JevStore {
     private static let canaryKey = "jev.canary.v1"
 
     static var defaults: UserDefaults {
-        UserDefaults(suiteName: appGroupID) ?? .standard
+        // App Group 不可用（免费签名最常见）时**必须**退到 standard。
+        // 只写 `UserDefaults(suiteName:) ?? .standard` 是不够的：套件对象照样能创建，
+        // 写入静默失败，读回来还是空——键盘就会一直报「还没配置」。
+        if groupUsable { return groupDefaults ?? .standard }
+        return .standard
     }
 
-    /// App Group 容器是否真的可写可读（签名没带上 entitlement 时 suite 会静默退化为私有容器）。
-    static var groupWritable: Bool {
-        let stamp = "t\(Date().timeIntervalSince1970)"
-        defaults.set(stamp, forKey: canaryKey)
-        return defaults.string(forKey: canaryKey) == stamp
+    private static var groupDefaults: UserDefaults? {
+        UserDefaults(suiteName: appGroupID)
     }
+
+    /// 真跑一次写+读，确认这个套件是可用的（而不是「创建成功但写不进去」）
+    private static var groupUsable: Bool {
+        guard let d = groupDefaults else { return false }
+        let stamp = "t\(UUID().uuidString)"
+        d.set(stamp, forKey: canaryKey)
+        let back = d.string(forKey: canaryKey)
+        d.removeObject(forKey: canaryKey)
+        return back == stamp
+    }
+
+    /// App Group 容器是否可用（供 App 引导页展示，语义与 groupUsable 一致）
+    static var groupWritable: Bool { groupUsable }
 
     static func loadConfig() -> JevConfig {
         guard let data = defaults.data(forKey: configKey),

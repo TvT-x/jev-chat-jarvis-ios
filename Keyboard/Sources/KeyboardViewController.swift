@@ -17,7 +17,7 @@ final class KeyboardViewController: UIInputViewController {
         jevLocalized(language, zh: zh, en: en)
     }
 
-    private enum Mode { case gate, idle, tones, loading, result, error }
+    private enum Mode { case gate, idle, tones, settings, loading, result, error }
 
     private var mode: Mode = .idle
     private var lastSource: Source = .clipboard
@@ -364,6 +364,7 @@ final class KeyboardViewController: UIInputViewController {
         case .gate: contentStack.addArrangedSubview(gateView())
         case .idle: contentStack.addArrangedSubview(idleView())
         case .tones: contentStack.addArrangedSubview(tonesView())
+        case .settings: contentStack.addArrangedSubview(settingsView())
         case .loading: contentStack.addArrangedSubview(loadingView())
         case .result: contentStack.addArrangedSubview(resultView())
         case .error: contentStack.addArrangedSubview(errorView())
@@ -483,13 +484,21 @@ final class KeyboardViewController: UIInputViewController {
         rows.append(guide)
         rows.append(btnRow)
         rows.append(tonesBtn)
+
+        // 免费签名拿不到 App Group 时，键盘读不到主 App 里填的 key。
+        // 这一行把配置入口放到键盘自己身上：粘一次就能用，不用重装、不用回 App。
+        let settingsBtn = KB.button(L("模型设置", "Model settings"), icon: "gearshape")
+        settingsBtn.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        settingsBtn.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
+        rows.append(settingsBtn)
+
         let vstack = UIStackView(arrangedSubviews: rows)
         vstack.axis = .vertical
         vstack.spacing = 8
         if JevDraft(cfg: cfg).isConfigured {
             // 配置完整时不占行
         } else {
-            let warn = KB.label(L("⚠️ 还没配置生成层：打开 Jev Jarvis App →「模型」页填 API Key", "⚠️ Generation is not configured: open Jev Jarvis → Models and add an API key"),
+            let warn = KB.label(L("⚠️ 还没配置生成层：点上面的「模型设置」粘贴 Key（不用回 App）", "⚠️ Generation is not configured: tap Model settings above and paste a key"),
                                 font: .systemFont(ofSize: 12), color: .systemOrange, lines: 0)
             vstack.addArrangedSubview(warn)
         }
@@ -568,6 +577,123 @@ final class KeyboardViewController: UIInputViewController {
         cfg.slots = Array(slots.prefix(MAX_SLOTS))
         JevStore.saveConfig(cfg)                       // 立刻落盘：下一次分析就用新槽位
         render()                                       // 重画刷新高亮
+    }
+
+    // MARK: 模型设置视图（不依赖 App Group）
+
+    @objc private func openSettings() { setMode(.settings) }
+
+    /// 可切换的生成层来源（排除「自定义」和 Ollama：前者地址为空，后者要局域网）
+    private static var swappablePresets: [ProviderPreset] {
+        ProviderPreset.all.filter { $0.id != "custom" && $0.id != "ollama" }
+    }
+
+    private func settingsView() -> UIView {
+        let cfg = JevStore.loadConfig()
+        var blocks: [UIView] = []
+
+        blocks.append(KB.label(
+            L("模型设置 · 存在键盘自己的容器里，不需要 App Group",
+              "Model settings · stored in the keyboard's own container, no App Group needed"),
+            font: .systemFont(ofSize: 12), color: KB.secondaryText, lines: 0))
+
+        // ---- 生成层 ----
+        let genName = ProviderPreset.all.first { $0.base == cfg.genBase }?.name ?? L("自定义", "Custom")
+        let genModelText = cfg.genModel.isEmpty ? L("无模型", "no model") : cfg.genModel
+        blocks.append(KB.label(
+            L("生成层（写候选）：\(genName) · \(genModelText) · key \(JevStore.masked(cfg.genKey))",
+              "Generation: \(genName) · \(genModelText) · key \(JevStore.masked(cfg.genKey))"),
+            font: .systemFont(ofSize: 13, weight: .medium), color: KB.primaryText, lines: 0))
+
+        let pasteGen = KB.button(L("粘贴生成层 Key", "Paste generation key"),
+                                 icon: "doc.on.clipboard", primary: cfg.genKey.isEmpty)
+        pasteGen.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        pasteGen.addTarget(self, action: #selector(pasteGenKey), for: .touchUpInside)
+        blocks.append(pasteGen)
+
+        let swap = KB.button(L("切换生成层来源（\(genName)）", "Switch generation provider"),
+                             icon: "arrow.triangle.2.circlepath")
+        swap.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        swap.addTarget(self, action: #selector(cycleGenPreset), for: .touchUpInside)
+        blocks.append(swap)
+
+        // ---- 判断层 ----
+        blocks.append(KB.label(
+            L("判断层（意图/风险/排序）：\(cfg.judgeModel) · key \(JevStore.masked(cfg.judgeKey))",
+              "Judge: \(cfg.judgeModel) · key \(JevStore.masked(cfg.judgeKey))"),
+            font: .systemFont(ofSize: 13, weight: .medium), color: KB.primaryText, lines: 0))
+
+        let pasteJudge = KB.button(L("粘贴判断层 Key", "Paste judge key"), icon: "doc.on.clipboard")
+        pasteJudge.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        pasteJudge.addTarget(self, action: #selector(pasteJudgeKey), for: .touchUpInside)
+        blocks.append(pasteJudge)
+
+        let judgeName = JudgePreset.all.first { $0.base == cfg.judgeBase }?.name ?? L("自定义", "Custom")
+        let swapJudge = KB.button(L("切换判断层来源（\(judgeName)）", "Switch judge provider"),
+                                  icon: "arrow.triangle.2.circlepath")
+        swapJudge.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        swapJudge.addTarget(self, action: #selector(cycleJudgePreset), for: .touchUpInside)
+        blocks.append(swapJudge)
+
+        let done = KB.button(L("好了", "Done"), icon: "checkmark", primary: true)
+        done.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        done.addTarget(self, action: #selector(backToIdle), for: .touchUpInside)
+        blocks.append(done)
+
+        let outer = UIStackView(arrangedSubviews: blocks)
+        outer.axis = .vertical
+        outer.spacing = 6
+        fitBlocks = blocks
+        return outer
+    }
+
+    @objc private func pasteGenKey() {
+        var cfg = JevStore.loadConfig()
+        guard let raw = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return }
+        cfg.genKey = raw
+        // 地址或模型为空时补一个能直接用的默认，避免「粘了 key 还判未配置」
+        if cfg.genBase.isEmpty { cfg.genBase = "https://open.bigmodel.cn/api/paas/v4" }
+        if cfg.genModel.isEmpty { cfg.genModel = "glm-4-flash" }
+        JevStore.saveConfig(cfg)
+        render()
+    }
+
+    @objc private func pasteJudgeKey() {
+        var cfg = JevStore.loadConfig()
+        guard let raw = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return }
+        cfg.judgeKey = raw
+        if cfg.judgeBase.isEmpty { cfg.judgeBase = "https://api.typesafe.ai" }
+        if cfg.judgeModel.isEmpty { cfg.judgeModel = "jev-latest" }
+        JevStore.saveConfig(cfg)
+        render()
+    }
+
+    @objc private func cycleGenPreset() {
+        let presets = Self.swappablePresets
+        guard !presets.isEmpty else { return }
+        var cfg = JevStore.loadConfig()
+        let idx = presets.firstIndex { $0.base == cfg.genBase } ?? -1
+        let next = presets[(idx + 1) % presets.count]
+        cfg.genKind = next.kind
+        cfg.genBase = next.base
+        cfg.genModel = next.model
+        cfg.genExtraJSON = ""
+        JevStore.saveConfig(cfg)      // key 保留：换来源不用重粘
+        render()
+    }
+
+    @objc private func cycleJudgePreset() {
+        let presets = JudgePreset.all.filter { $0.id != "custom" }
+        guard !presets.isEmpty else { return }
+        var cfg = JevStore.loadConfig()
+        let idx = presets.firstIndex { $0.base == cfg.judgeBase } ?? -1
+        let next = presets[(idx + 1) % presets.count]
+        cfg.judgeBase = next.base
+        cfg.judgeModel = next.model
+        JevStore.saveConfig(cfg)
+        render()
     }
 
     // MARK: 加载视图

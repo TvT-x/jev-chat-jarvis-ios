@@ -115,6 +115,11 @@ let PROMPT_ONE = """
 请写 {n} 条回复候选，语气统一成下面这一种，但两条的胆量要有差别：
 「{tone}」{instruction}
 
+军师约束（写之前先过一遍）：
+- 先接住情绪，再给一个具体信息点，最后留一个不逼人的开口；这三件事不要挤在同一条里
+- 不编造消息里没有的事实、时间、计划、情绪；不承诺结果
+- 不反问三连、不审问、不解释自己为什么这么回
+
 硬性要求：
 - 前一条稳妥、可以直接发出去；后一条把这个语气做足，更皮、更夸张一点也行
 - 每条不超过 30 个字，像日常聊天时打字的语气，不要客套话、不要解释
@@ -129,6 +134,11 @@ You just received a chat message and need to reply.
 {intent_line}
 Write {n} reply candidates in the same tone below, with different levels of boldness:
 “{tone}” {instruction}
+
+Strategist constraints (check before writing):
+- Acknowledge the feeling first, then one concrete piece of information, then an open door that does not pressure. Do not cram all three into one reply
+- Never invent facts, times, plans or feelings that are not in the message; never promise outcomes
+- No triple questions, no interrogation, no explaining why you worded it that way
 
 Hard requirements:
 - Write every reply in English, regardless of the language of the message
